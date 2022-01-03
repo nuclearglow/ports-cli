@@ -11,7 +11,7 @@ mod processes;
 
 /// Simple program to greet a person
 #[derive(Parser, Debug)]
-#[clap(about, version, author)]
+#[clap(about, version)]
 pub struct Args {
     /// show only ports opened by myself
     #[clap(short, long)]
