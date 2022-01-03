@@ -17,3 +17,8 @@ exclude = [
 [[bin]]
 name = "ports"
 path = "src/main.rs"
+
+[dependencies]
+netstat2 = "0.9"
+sysinfo = "0.22.4"
+users = "0.11.0"
