@@ -11,14 +11,16 @@ pub struct ProcessInfo {
 }
 impl From<i32> for ProcessInfo {
     fn from(pid: i32) -> Self {
+        let empty = String::from("");
         let sys = System::new_all();
         let process = sys.process(pid).unwrap();
+        let cmd = process.cmd().first().unwrap_or(&empty);
         let current_uid = get_current_uid();
 
         Self {
             pid: process.pid() as i32,
             name: process.name().to_string(),
-            cmd: process.cmd().to_owned().join(" "),
+            cmd: cmd.to_owned(),
             owner: get_user_by_uid(process.uid).unwrap(),
             is_current_user: get_user_by_uid(process.uid).unwrap().uid() == current_uid,
         }
