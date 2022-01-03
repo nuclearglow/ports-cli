@@ -1,34 +1,56 @@
 #[macro_use]
 extern crate prettytable;
 
-use colored::*;
-use prettytable::{color, format, Attr, Cell, Row, Table};
+use clap::Parser;
+use prettytable::{format, Cell, Row, Table};
 
 mod ports;
 mod processes;
 
+/// Simple program to greet a person
+#[derive(Parser, Debug)]
+#[clap(about, version, author)]
+pub struct Args {
+    /// show only ports opened by myself
+    #[clap(short, long)]
+    mine: bool,
+    /// display UDP ports
+    #[clap(long)]
+    udp: bool,
+    /// display IPv6 addresses with open ports
+    #[clap(long)]
+    ipv6: bool,
+}
+
 fn main() {
+    let args = Args::parse();
+
     let mut table = Table::new();
     table.set_format(*format::consts::FORMAT_NO_LINESEP_WITH_TITLE);
-    table.set_titles(row![l->"IP", l->"Port", l->"Process", l->"Owner", l->"CLI"]);
+    table.set_titles(row![l->"IP", c->"Protocol", l->"Port", l->"Process", l->"Owner", l->"CLI"]);
 
-    let sockets = ports::get_open_ports();
+    let sockets = ports::get_open_ports(args);
     for socket in sockets {
-        let color;
+        let colorspec;
 
+        // port opened by current user -> all yellow
         if socket.process_info.iter().any(|info| info.is_current_user) {
-            color = color::YELLOW
+            colorspec = "FY"
         } else {
-            color = match socket.port {
-                0..=1023 => color::RED,
-                1024..=49151 => color::BRIGHT_GREEN,
-                _ => color::GREEN,
+            colorspec = match socket.port {
+                // The Well Known Ports are those from 0 through 1023 -> red
+                0..=1023 => "Fr",
+                // The Registered Ports are those from 1024 through 49151. -> Bright Green
+                1024..=49151 => "FG",
+                // The Dynamic and Private Ports are those from 49152 through 65535. -> Green
+                _ => "Fg",
             }
         }
 
         table.add_row(Row::new(vec![
-            Cell::new(&socket.address.to_string().green()).with_style(Attr::ForegroundColor(color)),
-            Cell::new(&socket.port.to_string().red()).with_style(Attr::ForegroundColor(color)),
+            Cell::new(&socket.address.to_string()).style_spec(colorspec),
+            Cell::new(&socket.protocol).style_spec(&format!("c{:?}", colorspec)),
+            Cell::new(&socket.port.to_string()).style_spec(colorspec),
             Cell::new(
                 &socket
                     .process_info
@@ -37,7 +59,7 @@ fn main() {
                     .collect::<Vec<String>>()
                     .join("\n"),
             )
-            .with_style(Attr::ForegroundColor(color)),
+            .style_spec(colorspec),
             Cell::new(
                 &socket
                     .process_info
@@ -46,7 +68,7 @@ fn main() {
                     .collect::<Vec<String>>()
                     .join("\n"),
             )
-            .with_style(Attr::ForegroundColor(color)),
+            .style_spec(colorspec),
             Cell::new(
                 &socket
                     .process_info
@@ -58,7 +80,7 @@ fn main() {
                     .collect::<Vec<String>>()
                     .join("\n"),
             )
-            .with_style(Attr::ForegroundColor(color)),
+            .style_spec(colorspec),
         ]));
     }
     table.printstd();

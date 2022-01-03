@@ -19,8 +19,8 @@ name = "ports"
 path = "src/main.rs"
 
 [dependencies]
+clap = { version = "3.0.1", features = ["derive"] }
 netstat2 = "0.9"
 sysinfo = "0.22.4"
-users = "0.11.0"
 prettytable-rs = "^0.8"
-colored = "2"
+users = "0.11.0"
