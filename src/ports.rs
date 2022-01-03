@@ -20,7 +20,7 @@ impl From<netstat2::SocketInfo> for PortInfo {
     }
 }
 
-/// get a list of SocketInfo for listening ports or udp ports
+/// get a list of SocketInfo for open tcp ports (LISTENING) or udp ports
 pub fn get_open_ports() -> Vec<PortInfo> {
     // TODO: flags as params --tcp --udp --ipv4 --ipv6 ?
     let af_flags = AddressFamilyFlags::IPV4 | AddressFamilyFlags::IPV6;

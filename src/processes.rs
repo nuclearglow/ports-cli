@@ -14,15 +14,13 @@ impl From<i32> for ProcessInfo {
         let empty = String::from("");
         let sys = System::new_all();
         let process = sys.process(pid).unwrap();
-        let cmd = process.cmd().first().unwrap_or(&empty);
-        let current_uid = get_current_uid();
 
         Self {
             pid: process.pid() as i32,
             name: process.name().to_string(),
-            cmd: cmd.to_owned(),
+            cmd: process.cmd().first().unwrap_or(&empty).to_owned(),
             owner: get_user_by_uid(process.uid).unwrap(),
-            is_current_user: get_user_by_uid(process.uid).unwrap().uid() == current_uid,
+            is_current_user: get_user_by_uid(process.uid).unwrap().uid() == get_current_uid(),
         }
     }
 }
