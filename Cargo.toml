@@ -16,7 +16,7 @@ exclude = [
 
 [[bin]]
 name = "ports"
-path = "src/cli.rs"
+path = "src/main.rs"
 
 [dependencies]
 clap = { version = "3.0.1", features = ["derive"] }
