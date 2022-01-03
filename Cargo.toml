@@ -1,6 +1,6 @@
 [package]
 name = "ports-cli"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
 authors = ["nuky <svenvowe@gmail.com>"]
 description = "A minimal CLI tool to list open ports and associated processes."

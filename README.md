@@ -12,10 +12,10 @@ USAGE:
 
 OPTIONS:
     -h, --help       Print help information
+        --ipv6       display IPv6 addresses with open ports
     -m, --mine       show only ports opened by myself
         --udp        display UDP ports
     -V, --version    Print version information
-        --v6         display IPv6 addresses
 ```
 
 # Alternatives
