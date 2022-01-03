@@ -3,7 +3,7 @@ name = "ports-cli"
 version = "0.1.0"
 edition = "2021"
 authors = ["nuky <svenvowe@gmail.com>"]
-description = "A minimal CLI tool to list open ports and associated processes"
+description = "A minimal CLI tool to list open ports and associated processes."
 keywords = ["cli", "system", "process", "port", "pid"]
 categories = ["command-line-utilities"]
 repository = "https://github.com/nuclearglow/ports-cli"
@@ -16,7 +16,7 @@ exclude = [
 
 [[bin]]
 name = "ports"
-path = "src/main.rs"
+path = "src/cli.rs"
 
 [dependencies]
 clap = { version = "3.0.1", features = ["derive"] }

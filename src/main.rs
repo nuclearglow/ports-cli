@@ -1,3 +1,5 @@
+//! A minimal CLI tool to list open ports and associated processes.
+
 #[macro_use]
 extern crate prettytable;
 
