@@ -6,6 +6,7 @@ extern crate prettytable;
 use clap::Parser;
 use prettytable::{format, Cell, Row, Table};
 
+mod constants;
 mod ports;
 mod processes;
 
@@ -29,7 +30,9 @@ fn main() {
 
     let mut table = Table::new();
     table.set_format(*format::consts::FORMAT_NO_LINESEP_WITH_TITLE);
-    table.set_titles(row![l->"IP", c->"Protocol", l->"Port", l->"Process", l->"Owner", l->"CLI"]);
+    table.set_titles(
+        row![l->"IP", c->"Protocol", l->"Port", l->"Owner", l->"Process", l->"PID", l->"Command"],
+    );
 
     let sockets = ports::get_open_ports(args);
     for socket in sockets {
@@ -57,15 +60,6 @@ fn main() {
                 &socket
                     .process_info
                     .iter()
-                    .map(|info| info.name.to_owned())
-                    .collect::<Vec<String>>()
-                    .join("\n"),
-            )
-            .style_spec(colorspec),
-            Cell::new(
-                &socket
-                    .process_info
-                    .iter()
                     .map(|info| info.owner.name().to_os_string().into_string().unwrap())
                     .collect::<Vec<String>>()
                     .join("\n"),
@@ -75,9 +69,30 @@ fn main() {
                 &socket
                     .process_info
                     .iter()
+                    .map(|info| info.name.to_owned())
+                    .collect::<Vec<String>>()
+                    .join("\n"),
+            )
+            .style_spec(colorspec),
+            Cell::new(
+                &socket
+                    .process_info
+                    .iter()
+                    .map(|info| format!("{}", info.pid))
+                    .collect::<Vec<String>>()
+                    .join("\n"),
+            )
+            .style_spec(colorspec),
+            Cell::new(
+                &socket
+                    .process_info
+                    .iter()
                     .map(|info| match info.cmd.chars().count() {
-                        0..=40 => info.cmd.to_owned(),
-                        _ => format!("{}...", info.cmd[0..40].to_string()),
+                        0..=constants::COMMAND_DISPLAY_MAX_LENGTH => info.cmd.to_owned(),
+                        _ => format!(
+                            "{}...",
+                            info.cmd[0..constants::COMMAND_DISPLAY_MAX_LENGTH].to_string()
+                        ),
                     })
                     .collect::<Vec<String>>()
                     .join("\n"),

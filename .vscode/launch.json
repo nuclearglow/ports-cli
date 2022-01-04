@@ -19,7 +19,7 @@
                     "kind": "bin"
                 }
             },
-            "args": ["--mine", "--udp", "--ipv6"],
+            "args": ["--udp", "--ipv6"],
             "cwd": "${workspaceFolder}"
         },
         {
