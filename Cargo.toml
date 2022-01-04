@@ -1,6 +1,6 @@
 [package]
 name = "ports-cli"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2021"
 authors = ["nuky <svenvowe@gmail.com>"]
 description = "A minimal CLI tool to list open ports and associated processes."
@@ -20,6 +20,9 @@ path = "src/main.rs"
 
 [dependencies]
 clap = { version = "3.0.1", features = ["derive"] }
+exitcode = "1.1.2"
+log = "0.4"
+env_logger = "0.9.0"
 netstat2 = "0.9"
 sysinfo = "0.22.4"
 prettytable-rs = "^0.8"

@@ -4,7 +4,10 @@
 extern crate prettytable;
 
 use clap::Parser;
+use log;
+use ports::PortInfo;
 use prettytable::{format, Cell, Row, Table};
+use std::{env, process};
 
 mod constants;
 mod ports;
@@ -27,6 +30,10 @@ pub struct Args {
 
 fn main() {
     let args = Args::parse();
+    if env::var_os("RUST_LOG").is_none() {
+        env::set_var("RUST_LOG", "info");
+    }
+    env_logger::builder().format_timestamp(None).init();
 
     let mut table = Table::new();
     table.set_format(*format::consts::FORMAT_NO_LINESEP_WITH_TITLE);
@@ -35,6 +42,12 @@ fn main() {
     );
 
     let sockets = ports::get_open_ports(args);
+
+    if (sockets.len() == 0) {
+        log::info!("No open sockets detected...");
+        process::exit(exitcode::OK);
+    }
+
     for socket in sockets {
         let colorspec;
 
