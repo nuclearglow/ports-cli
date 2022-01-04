@@ -5,7 +5,6 @@ extern crate prettytable;
 
 use clap::Parser;
 use log;
-use ports::PortInfo;
 use prettytable::{format, Cell, Row, Table};
 use std::{env, process};
 
@@ -43,7 +42,7 @@ fn main() {
 
     let sockets = ports::get_open_ports(args);
 
-    if (sockets.len() == 0) {
+    if sockets.len() == 0 {
         log::info!("No open sockets detected...");
         process::exit(exitcode::OK);
     }
