@@ -1,74 +1,151 @@
-use netstat2::{get_sockets_info, AddressFamilyFlags, ProtocolFlags, ProtocolSocketInfo, TcpState};
-use std::cmp::Ordering;
-use std::net;
+use std::fmt;
+use std::net::IpAddr;
 
-use crate::processes::{get_process_info, ProcessInfo};
-use crate::Args;
+use anyhow::{Context, Result};
+use netstat2::{
+    AddressFamilyFlags, ProtocolFlags, ProtocolSocketInfo, SocketInfo, TcpState, get_sockets_info,
+};
 
-#[derive(Debug)]
-pub struct PortInfo {
-    pub address: net::IpAddr,
-    pub port: u16,
-    pub protocol: String,
-    pub process_info: Vec<ProcessInfo>,
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum Protocol {
+    Tcp,
+    Udp,
 }
-impl From<netstat2::SocketInfo> for PortInfo {
-    fn from(socket_info: netstat2::SocketInfo) -> Self {
-        let protocol = match socket_info.protocol_socket_info {
-            ProtocolSocketInfo::Tcp(_) => "TCP",
-            ProtocolSocketInfo::Udp(_) => "UDP",
-        };
-        Self {
-            address: socket_info.local_addr(),
-            port: socket_info.local_port(),
-            protocol: protocol.to_string(),
-            process_info: get_process_info(socket_info.associated_pids),
+
+impl fmt::Display for Protocol {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(match self {
+            Protocol::Tcp => "TCP",
+            Protocol::Udp => "UDP",
+        })
+    }
+}
+
+/// Which sockets to list. Selecting neither or both of a pair means "both".
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Filter {
+    pub tcp: bool,
+    pub udp: bool,
+    pub ipv4: bool,
+    pub ipv6: bool,
+}
+
+impl Filter {
+    fn protocol_flags(self) -> ProtocolFlags {
+        match (self.tcp, self.udp) {
+            (true, false) => ProtocolFlags::TCP,
+            (false, true) => ProtocolFlags::UDP,
+            _ => ProtocolFlags::TCP | ProtocolFlags::UDP,
+        }
+    }
+
+    fn address_family_flags(self) -> AddressFamilyFlags {
+        match (self.ipv4, self.ipv6) {
+            (true, false) => AddressFamilyFlags::IPV4,
+            (false, true) => AddressFamilyFlags::IPV6,
+            _ => AddressFamilyFlags::IPV4 | AddressFamilyFlags::IPV6,
         }
     }
 }
 
-/// get the PortInfo list:
-/// - get socket info according to flags --ipv6 and --udp
-/// - filter open tcp ports
-/// - assemble PortInfo
-/// - filter according to flag --mine
-/// - sort by port number ascending
-pub fn get_open_ports(args: Args) -> Vec<PortInfo> {
-    let af_flags = match args.ipv6 {
-        true => AddressFamilyFlags::IPV4 | AddressFamilyFlags::IPV6,
-        false => AddressFamilyFlags::IPV4,
-    };
+/// A local socket that is listening (TCP) or bound (UDP).
+#[derive(Debug)]
+pub struct Socket {
+    pub protocol: Protocol,
+    pub address: IpAddr,
+    pub port: u16,
+    pub pids: Vec<u32>,
+    /// Owner of the socket, on platforms that report it (Linux).
+    pub uid: Option<u32>,
+}
 
-    let proto_flags = match args.udp {
-        true => ProtocolFlags::TCP | ProtocolFlags::UDP,
-        false => ProtocolFlags::TCP,
-    };
+impl Socket {
+    fn from_listening(info: SocketInfo) -> Option<Self> {
+        let protocol = match &info.protocol_socket_info {
+            ProtocolSocketInfo::Tcp(tcp) if tcp.state == TcpState::Listen => Protocol::Tcp,
+            ProtocolSocketInfo::Tcp(_) => return None,
+            ProtocolSocketInfo::Udp(_) => Protocol::Udp,
+        };
+        Some(Self {
+            protocol,
+            address: info.local_addr(),
+            port: info.local_port(),
+            uid: socket_uid(&info),
+            pids: info.associated_pids,
+        })
+    }
+}
 
-    let sockets = get_sockets_info(af_flags, proto_flags).unwrap_or_default();
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn socket_uid(info: &SocketInfo) -> Option<u32> {
+    Some(info.uid)
+}
 
-    let mut ports: Vec<PortInfo> = sockets
+#[cfg(not(any(target_os = "linux", target_os = "android")))]
+fn socket_uid(_info: &SocketInfo) -> Option<u32> {
+    None
+}
+
+/// List listening TCP sockets and bound UDP sockets matching `filter`.
+pub fn listening_sockets(filter: Filter) -> Result<Vec<Socket>> {
+    let sockets = get_sockets_info(filter.address_family_flags(), filter.protocol_flags())
+        .context("failed to read socket information")?;
+    Ok(sockets
         .into_iter()
-        .filter(|socket_info| match &socket_info.protocol_socket_info {
-            ProtocolSocketInfo::Tcp(tcp) => tcp.state == TcpState::Listen,
-            ProtocolSocketInfo::Udp(_) => true,
-        })
-        .map(|socket_info| PortInfo::from(socket_info))
-        .filter(|port_info| match args.mine {
-            true => port_info
-                .process_info
-                .iter()
-                .any(|process| process.is_current_user),
-            false => true,
-        })
-        .collect();
+        .filter_map(Socket::from_listening)
+        .collect())
+}
 
-    ports.sort_by(|a, b| {
-        if a.port < b.port {
-            Ordering::Less
-        } else {
-            Ordering::Greater
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn filter(tcp: bool, udp: bool, ipv4: bool, ipv6: bool) -> Filter {
+        Filter {
+            tcp,
+            udp,
+            ipv4,
+            ipv6,
         }
-    });
+    }
 
-    ports
+    #[test]
+    fn no_flags_selects_everything() {
+        let f = Filter::default();
+        assert_eq!(f.protocol_flags(), ProtocolFlags::TCP | ProtocolFlags::UDP);
+        assert_eq!(
+            f.address_family_flags(),
+            AddressFamilyFlags::IPV4 | AddressFamilyFlags::IPV6
+        );
+    }
+
+    #[test]
+    fn single_flags_narrow_selection() {
+        assert_eq!(
+            filter(true, false, false, false).protocol_flags(),
+            ProtocolFlags::TCP
+        );
+        assert_eq!(
+            filter(false, true, false, false).protocol_flags(),
+            ProtocolFlags::UDP
+        );
+        assert_eq!(
+            filter(false, false, true, false).address_family_flags(),
+            AddressFamilyFlags::IPV4
+        );
+        assert_eq!(
+            filter(false, false, false, true).address_family_flags(),
+            AddressFamilyFlags::IPV6
+        );
+    }
+
+    #[test]
+    fn both_flags_select_both() {
+        let f = filter(true, true, true, true);
+        assert_eq!(f.protocol_flags(), ProtocolFlags::TCP | ProtocolFlags::UDP);
+        assert_eq!(
+            f.address_family_flags(),
+            AddressFamilyFlags::IPV4 | AddressFamilyFlags::IPV6
+        );
+    }
 }

@@ -1,116 +1,126 @@
 //! A minimal CLI tool to list open ports and associated processes.
 
-#[macro_use]
-extern crate prettytable;
+use std::io::{self, Write};
 
+use anyhow::Result;
 use clap::Parser;
-use log;
-use prettytable::{format, Cell, Row, Table};
-use std::{env, process};
 
-mod constants;
+mod output;
 mod ports;
 mod processes;
 
-/// Simple program to greet a person
+use output::Entry;
+use ports::{Filter, Socket};
+use processes::{Processes, uid_from_raw};
+
+const AFTER_HELP: &str = "\
+Without filters, all listening TCP and bound UDP sockets on IPv4 and IPv6 are shown.
+
+Colors: yellow = your own processes, red = well-known ports (0-1023),
+green = registered ports (1024-49151), dark green = dynamic ports (49152-65535).
+Set NO_COLOR to disable colors.
+
+Processes of other users are only visible when running as root (e.g. with sudo).";
+
+/// A minimal CLI tool to list open ports and associated processes.
 #[derive(Parser, Debug)]
-#[clap(about, version)]
-pub struct Args {
-    /// show only ports opened by myself
-    #[clap(short, long)]
-    mine: bool,
-    /// display UDP ports
-    #[clap(long)]
+#[command(version, about, after_help = AFTER_HELP)]
+struct Args {
+    /// Show TCP sockets
+    #[arg(short, long)]
+    tcp: bool,
+    /// Show UDP sockets
+    #[arg(short, long)]
     udp: bool,
-    /// display IPv6 addresses with open ports
-    #[clap(long)]
+    /// Show IPv4 sockets
+    #[arg(short = '4', long)]
+    ipv4: bool,
+    /// Show IPv6 sockets
+    #[arg(short = '6', long)]
     ipv6: bool,
+    /// Show only ports opened by processes of the current user
+    #[arg(short, long)]
+    mine: bool,
 }
 
-fn main() {
+fn main() -> Result<()> {
     let args = Args::parse();
-    if env::var_os("RUST_LOG").is_none() {
-        env::set_var("RUST_LOG", "info");
+    let filter = Filter {
+        tcp: args.tcp,
+        udp: args.udp,
+        ipv4: args.ipv4,
+        ipv6: args.ipv6,
+    };
+
+    let sockets = ports::listening_sockets(filter)?;
+    let processes = Processes::load(sockets.iter().flat_map(|socket| socket.pids.clone()))?;
+
+    let mut entries: Vec<Entry> = sockets
+        .iter()
+        .flat_map(|socket| entries_for(socket, &processes))
+        .filter(|entry| !args.mine || entry.is_mine)
+        .collect();
+    output::normalize(&mut entries);
+
+    if entries.is_empty() {
+        eprintln!("No open ports found.");
+        return Ok(());
     }
-    env_logger::builder().format_timestamp(None).init();
 
-    let mut table = Table::new();
-    table.set_format(*format::consts::FORMAT_NO_LINESEP_WITH_TITLE);
-    table.set_titles(
-        row![l->"IP", c->"Protocol", l->"Port", l->"Owner", l->"Process", l->"PID", l->"Command"],
-    );
-
-    let sockets = ports::get_open_ports(args);
-
-    if sockets.len() == 0 {
-        log::info!("No open sockets detected...");
-        process::exit(exitcode::OK);
-    }
-
-    for socket in sockets {
-        let colorspec;
-
-        // port opened by current user -> all yellow
-        if socket.process_info.iter().any(|info| info.is_current_user) {
-            colorspec = "FY"
-        } else {
-            colorspec = match socket.port {
-                // The Well Known Ports are those from 0 through 1023 -> red
-                0..=1023 => "Fr",
-                // The Registered Ports are those from 1024 through 49151. -> Bright Green
-                1024..=49151 => "FG",
-                // The Dynamic and Private Ports are those from 49152 through 65535. -> Green
-                _ => "Fg",
-            }
+    if let Err(err) = writeln!(io::stdout().lock(), "{}", output::render(&entries)) {
+        // Output piped into e.g. `head` that exited early.
+        if err.kind() != io::ErrorKind::BrokenPipe {
+            return Err(err.into());
         }
-
-        table.add_row(Row::new(vec![
-            Cell::new(&socket.address.to_string()).style_spec(colorspec),
-            Cell::new(&socket.protocol).style_spec(&format!("c{:?}", colorspec)),
-            Cell::new(&socket.port.to_string()).style_spec(colorspec),
-            Cell::new(
-                &socket
-                    .process_info
-                    .iter()
-                    .map(|info| info.owner.name().to_os_string().into_string().unwrap())
-                    .collect::<Vec<String>>()
-                    .join("\n"),
-            )
-            .style_spec(colorspec),
-            Cell::new(
-                &socket
-                    .process_info
-                    .iter()
-                    .map(|info| info.name.to_owned())
-                    .collect::<Vec<String>>()
-                    .join("\n"),
-            )
-            .style_spec(colorspec),
-            Cell::new(
-                &socket
-                    .process_info
-                    .iter()
-                    .map(|info| format!("{}", info.pid))
-                    .collect::<Vec<String>>()
-                    .join("\n"),
-            )
-            .style_spec(colorspec),
-            Cell::new(
-                &socket
-                    .process_info
-                    .iter()
-                    .map(|info| match info.cmd.chars().count() {
-                        0..=constants::COMMAND_DISPLAY_MAX_LENGTH => info.cmd.to_owned(),
-                        _ => format!(
-                            "{}...",
-                            info.cmd[0..constants::COMMAND_DISPLAY_MAX_LENGTH].to_string()
-                        ),
-                    })
-                    .collect::<Vec<String>>()
-                    .join("\n"),
-            )
-            .style_spec(colorspec),
-        ]));
     }
-    table.printstd();
+
+    let unknown = entries.iter().filter(|entry| entry.pid.is_none()).count();
+    if unknown > 0 && !processes.is_root() {
+        eprintln!(
+            "note: {unknown} socket(s) belong to processes that are not visible to you. \
+             Run as root (e.g. with sudo) to see them."
+        );
+    }
+
+    Ok(())
+}
+
+/// One entry per process holding the socket, or a single entry without process details.
+fn entries_for(socket: &Socket, processes: &Processes) -> Vec<Entry> {
+    let socket_uid = socket.uid.and_then(uid_from_raw);
+    let entry = |pid: Option<u32>| {
+        let info = pid.and_then(|pid| processes.get(pid));
+        let owner_uid = info
+            .as_ref()
+            .and_then(|info| info.uid.clone())
+            .or_else(|| socket_uid.clone());
+        let is_mine = owner_uid.is_some() && owner_uid.as_ref() == processes.current_uid();
+        Entry {
+            port: socket.port,
+            protocol: socket.protocol,
+            address: socket.address,
+            pid,
+            owner: owner_uid.as_ref().map(|uid| processes.user_name(uid)),
+            process: info.as_ref().map(|info| info.name.clone()),
+            command: info.map(|info| info.command),
+            is_mine,
+        }
+    };
+
+    if socket.pids.is_empty() {
+        vec![entry(None)]
+    } else {
+        socket.pids.iter().map(|&pid| entry(Some(pid))).collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use clap::CommandFactory;
+
+    #[test]
+    fn cli_is_valid() {
+        Args::command().debug_assert();
+    }
 }

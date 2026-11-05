@@ -1,29 +1,29 @@
 [package]
 name = "ports-cli"
-version = "0.2.2"
-edition = "2021"
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.95"
 authors = ["nuky <svenvowe@gmail.com>"]
 description = "A minimal CLI tool to list open ports and associated processes."
-keywords = ["cli", "system", "process", "port", "pid"]
-categories = ["command-line-utilities"]
+keywords = ["cli", "network", "port", "process", "netstat"]
+categories = ["command-line-utilities", "network-programming"]
 repository = "https://github.com/nuclearglow/ports-cli"
 readme = "README.md"
 license = "MIT"
-exclude = [
-    ".vscode/*",
-    ".gitignore"
-]
+include = ["src/**/*", "tests/**/*", "Cargo.toml", "Cargo.lock", "README.md", "LICENSE", "CHANGELOG.md"]
 
 [[bin]]
 name = "ports"
 path = "src/main.rs"
 
 [dependencies]
-clap = { version = "3.0.1", features = ["derive"] }
-exitcode = "1.1.2"
-log = "0.4"
-env_logger = "0.9.0"
-netstat2 = "0.9"
-sysinfo = "0.22.4"
-prettytable-rs = "^0.8"
-users = "0.11.0"
+anyhow = "1"
+clap = { version = "4", features = ["derive", "wrap_help"] }
+comfy-table = "8"
+netstat2 = "0.11"
+sysinfo = { version = "0.40", default-features = false, features = ["system", "user"] }
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
