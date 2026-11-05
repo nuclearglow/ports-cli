@@ -67,7 +67,11 @@ fn main() -> Result<()> {
         return Ok(());
     }
 
-    if let Err(err) = writeln!(io::stdout().lock(), "{}", output::render(&entries)) {
+    if let Err(err) = writeln!(
+        io::stdout().lock(),
+        "{}",
+        output::render(&entries, output::Options::detect())
+    ) {
         // Output piped into e.g. `head` that exited early.
         if err.kind() != io::ErrorKind::BrokenPipe {
             return Err(err.into());

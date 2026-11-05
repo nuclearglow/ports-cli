@@ -1,3 +1,4 @@
+use std::io::{self, IsTerminal};
 use std::net::IpAddr;
 
 use comfy_table::presets::{NOTHING, UTF8_FULL_CONDENSED};
@@ -33,16 +34,45 @@ pub fn normalize(entries: &mut Vec<Entry>) {
     entries.dedup();
 }
 
-pub fn render(entries: &[Entry]) -> String {
-    let mut table = Table::new();
-    let tty = table.is_tty();
-    let color = tty && std::env::var_os("NO_COLOR").is_none_or(|value| value.is_empty());
+/// How to render the table. Decided once up front, so rendering never
+/// depends on the environment it happens to run in (e.g. tests in a terminal).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Options {
+    /// Draw borders and fit the table to the terminal width.
+    pub terminal: bool,
+    pub color: bool,
+    /// Table width; `None` means the width of the terminal.
+    pub width: Option<u16>,
+}
 
-    if tty {
+impl Options {
+    pub fn detect() -> Self {
+        let terminal = io::stdout().is_terminal();
+        let no_color = std::env::var_os("NO_COLOR").is_some_and(|value| !value.is_empty());
+        Self {
+            terminal,
+            color: terminal && !no_color,
+            width: None,
+        }
+    }
+}
+
+pub fn render(entries: &[Entry], options: Options) -> String {
+    let mut table = Table::new();
+    let color = options.color;
+    if color {
+        table.enforce_styling();
+    }
+
+    if options.terminal {
         table
             .load_style(UTF8_FULL_CONDENSED.with_rounded_corners())
             .set_content_arrangement(ContentArrangement::Dynamic);
+        if let Some(width) = options.width {
+            table.set_width(width);
+        }
     } else {
+        table.force_no_tty();
         // Plain, borderless columns are easier to process with grep, awk & co.
         table.load_style(NOTHING);
     }
@@ -90,7 +120,7 @@ pub fn render(entries: &[Entry]) -> String {
         }
     }
 
-    if tty {
+    if options.terminal {
         table.to_string()
     } else {
         table.trim_fmt()
@@ -122,6 +152,12 @@ fn port_color(entry: &Entry) -> Color {
 mod tests {
     use super::*;
     use std::net::{Ipv4Addr, Ipv6Addr};
+
+    const PLAIN: Options = Options {
+        terminal: false,
+        color: false,
+        width: None,
+    };
 
     fn entry(port: u16, protocol: Protocol, address: IpAddr, pid: Option<u32>) -> Entry {
         Entry {
@@ -190,9 +226,49 @@ mod tests {
     #[test]
     fn missing_values_render_as_dash() {
         let v4 = IpAddr::V4(Ipv4Addr::UNSPECIFIED);
-        let output = render(&[entry(22, Protocol::Tcp, v4, None)]);
+        let output = render(&[entry(22, Protocol::Tcp, v4, None)], PLAIN);
         let row = output.lines().nth(1).expect("data row");
         let columns: Vec<&str> = row.split_whitespace().collect();
         assert_eq!(columns, ["0.0.0.0", "TCP", "22", "-", "-", "-", "-"]);
+    }
+
+    #[test]
+    fn plain_output_has_no_styling_or_padding() {
+        let v4 = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let output = render(&[entry(22, Protocol::Tcp, v4, None)], PLAIN);
+        assert!(!output.contains('\x1b'));
+        assert!(!output.contains('│'));
+        assert!(output.lines().all(|line| !line.ends_with(' ')));
+    }
+
+    #[test]
+    fn terminal_output_fits_width_and_truncates_command() {
+        let v4 = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let long = Entry {
+            command: Some("x".repeat(200)),
+            ..entry(8080, Protocol::Tcp, v4, Some(1))
+        };
+        let options = Options {
+            terminal: true,
+            color: false,
+            width: Some(80),
+        };
+        let output = render(&[long], options);
+        assert!(output.contains('│'));
+        assert!(output.contains('…'));
+        assert!(!output.contains('\x1b'));
+        assert!(output.lines().all(|line| line.chars().count() <= 80));
+    }
+
+    #[test]
+    fn color_option_styles_output() {
+        let v4 = IpAddr::V4(Ipv4Addr::LOCALHOST);
+        let options = Options {
+            terminal: true,
+            color: true,
+            width: Some(80),
+        };
+        let output = render(&[entry(22, Protocol::Tcp, v4, None)], options);
+        assert!(output.contains('\x1b'));
     }
 }

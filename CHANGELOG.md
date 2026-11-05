@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Tests failed when run from an interactive terminal, because table rendering
+  detected the terminal of the test process.
+
 ## 0.3.0
 
 ### Fixed
