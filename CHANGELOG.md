@@ -1,5 +1,12 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+
+- Integration tests could fail when another process held the same port number
+  on a different address.
+
 ## 0.3.1
 
 ### Fixed
