@@ -44,6 +44,10 @@ msrv: ## Check the build with the minimum supported Rust version
 	rustup toolchain list | grep -q '^$(MSRV)' || rustup toolchain install $(MSRV) --profile minimal
 	$(CARGO) +$(MSRV) check --all-targets --locked
 
+.PHONY: hooks
+hooks: ## Install the git pre-commit hook (runs 'make ci')
+	pre-commit install
+
 ##@ Build
 
 .PHONY: build
